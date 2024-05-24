@@ -4,14 +4,20 @@ const jwt = require('jsonwebtoken')
 const { User, Role, Position, Competence } = require('../models/models')
 const ApiError = require('../error/ApiError')
 
-const generateJwt = (id, email, roleRang) => {
-    return jwt.sign({ id, email, roleRang },
+const generateJwt = (id, email, roleRang,
+    firstName,
+    lastName,
+    surName) => {
+    return jwt.sign({
+        id, email, roleRang, firstName,
+        lastName,
+        surName
+    },
         process.env.SECRET_KEY,
         { expiresIn: '24h' })
 }
 
 const ExcelJS = require("exceljs");
-const fs = require('fs');
 
 
 async function generateExcel(data, outputPath = './Сотрудники.xlsx') {
@@ -38,125 +44,16 @@ async function generateExcel(data, outputPath = './Сотрудники.xlsx') {
     await workbook.xlsx.writeFile(outputPath);
 }
 
-function generateXLS(data) {
-    try {
-        const workbook = new ExcelJS.Workbook();
-        const worksheet = workbook.addWorksheet("Отчет развития компетенций сотрудников", {
-            pageSetup: { paperSize: 9, orientation: "landscape" },
-        });
-
-        // Initialize the row index
-        let rowIndex = 2;
-
-        let row = worksheet.getRow(rowIndex);
-        row.values = ["ФИО", "Должность", "Освоение компетенций"];
-        row.font = { bold: true };
-
-        const columnWidths = [20, 20, 20];
-
-        row.eachCell((cell, colNumber) => {
-            const columnIndex = colNumber - 1;
-            const columnWidth = columnWidths[columnIndex];
-            worksheet.getColumn(colNumber).width = columnWidth;
-        });
-
-        // Loop over the grouped data
-        data.forEach((task, index) => {
-            const row = worksheet.getRow(rowIndex + index + 1);
-            row.getCell("A").value = task.fio;
-            row.getCell("B").value = task.grade;
-            row.getCell("C").value = task.progress;
-
-            row.getCell("B").alignment = { wrapText: true };
-        });
-        // Increment the row index
-        rowIndex += data.length;
-
-        // Merge cells for the logo
-        worksheet.mergeCells(
-            `A1:${String.fromCharCode(65 + worksheet.columns.length - 1)}1`
-        );
-
-        // const image = workbook.addImage({
-        //     base64: LOGO_64, //replace it your image (base 64 in this case)
-        //     extension: "png",
-        // });
-
-        // worksheet.addImage(image, {
-        //     tl: { col: 0, row: 0 },
-        //     ext: { width: 60, height: 40 },
-        // });
-
-        worksheet.getRow(1).height = 40;
-
-
-        // Define the border style
-        const borderStyle = {
-            style: "thin", // You can use 'thin', 'medium', 'thick', or other valid styles
-            color: { argb: "00000000" },
-        };
-
-        // Loop through all cells and apply the border style
-        worksheet.eachRow((row, rowNumber) => {
-            row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
-                cell.border = {
-                    top: borderStyle,
-                    bottom: borderStyle,
-                };
-            });
-        });
-
-        // Generate the XLS file
-        return workbook.xlsx.writeBuffer();
-    } catch (err) {
-        console.log(err);
-    }
-}
-
-const jsonToExel = async (data) => {
-    const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet('Personel');
-
-    // Заголовки столбцов
-    worksheet.columns = [
-        { header: 'FIO', key: 'fio', width: 30 },
-        { header: 'Grade', key: 'grade', width: 20 },
-        { header: 'Competetion complete', key: 'progress', width: 20 }
-    ];
-
-    // Добавление данных
-    data.forEach((item) => {
-        worksheet.addRow({
-            fio: item.fio,
-            grade: item.grade,
-            progress: item.progress
-        });
-    });
-
-    const file = await workbook.xlsx.writeFile(outputPath);
-    return file
-}
-
-function generatePDF(data, outputPath = './output.pdf') {
-    const doc = new PDFDocument();
-
-    // Устанавливаем путь для сохранения PDF
-    const stream = fs.createWriteStream(outputPath);
-    doc.pipe(stream);
-
-    // Добавляем данные в PDF
-    doc.fontSize(12).text('ФИО\t\t\tДолжность\t\tОсвоение компетенций', { bold: true });
-    data.forEach(item => {
-        doc.fontSize(12).text(`${item.fio}\t\t\t${item.grade}\t\t\t${item.progress}`);
-    });
-
-    // Завершаем создание PDF
-    doc.end();
-}
 
 class UserController {
     async getUser(req, res, next) {
-        return next(ApiError.badRequest('error'))
+        const {
+            id,
+        } = req.query
+
+        const user = await User.findOne({ where: { id } })
+
+        return res.json({ user })
     }
     async getUsers(req, res, next) {
         const users = await User.findAll()
@@ -187,12 +84,29 @@ class UserController {
 
         const user = await User.create({ email, password: hashPassword, firstName, lastName, surName, avatar, personelId, positionId, roleId, matrixId })
         const role = await Role.findOne({ where: { id: user.roleId } })
-        const token = generateJwt(user.id, email, role.rang)
+        const token = generateJwt(user.id, email, role.rang, user.firstName, user.lastName, user.surName)
 
-        return res.json({ token })
+        return res.json({ user, token })
     }
-    async updateUser(req, res) { }
-    async deleteUser(req, res) { }
+    async updateUser(req, res) {
+        const { id,
+            positionId,
+        } = req.body
+
+        const user = await User.update({ positionId }, { where: { id } })
+
+
+        return res.json(user)
+    }
+
+    async deleteUser(req, res) {
+        const {
+            id,
+        } = req.query
+
+        const user = User.destroy({ where: { id } })
+        return res.json(user)
+    }
 
     async login(req, res, next) {
         const { email,
@@ -211,15 +125,17 @@ class UserController {
             return next(ApiError.badRequest('Неверно указан логин или пароль'))
         }
         const role = await Role.findOne({ where: { id: user.roleId } })
-        const token = generateJwt(user.id, user.email, role.rang)
+        const token = generateJwt(user.id, user.email, role.rang, user.firstName, user.lastName, user.surName)
 
         return res.json({ token })
 
     }
     async check(req, res) {
-        const token = generateJwt(req.user.id, req.user.email, req.user.role)
+        const token = generateJwt(req.user.id, req.user.email, req.user.role, req.user.firstName, req.user.lastName, req.user.surName)
         return res.json({ token })
     }
+
+
 
     async generadeManagerReport(req, res) {
         try {
@@ -267,28 +183,14 @@ class UserController {
 
                 const filePath = './static/Personel.xlsx'
 
-                // const xlsBuffer = await generateXLS(preparedUsers);
-                console.log('work')
                 await generateExcel(preparedUsers, filePath);
-                console.log('work 0.5')
 
 
-                // const xlsBuffer = await jsonToExel(preparedUsers);
-                // res.set("Content-Disposition", "attachment; filename=data.xlsx");
-                // res.type("application/vnd.ms-excel");
-                // res.send(xlsBuffer);
-                console.log('work 0.6')
                 res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-                console.log('work 0.7')
-                // res.set("Content-Disposition", "attachment; filename=Сотрудники.xlsx");
-                // res.setHeader('Content-Disposition', 'attachment; filename="Сотрудники.xlsx"');
                 res.setHeader('Content-Disposition', 'attachment; filename="filename.xlsx"');
-                console.log('work1')
                 // Отправка файла
-                const stream = fs.createReadStream(filePath, { encoding: 'utf8' });
-                console.log('work2')
-                console.log('res', res)
-                stream.pipe(res);
+                return res.json({ message: 'success' })
+
             }
         } catch (err) {
             res.json("Something went wrong");

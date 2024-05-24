@@ -16,4 +16,4 @@ router.get('/auth', authMiddleware, userController.check)
 
 router.post('/managerReport', userController.generadeManagerReport)
 
-module.exports = router; 
+module.exports = router;   
